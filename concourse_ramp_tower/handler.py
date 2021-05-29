@@ -221,8 +221,6 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                     logger.warning("Unrecognized event")
             else:
                 logger.warning("Unrecognized event")
-        else:
-            logger.warning("Unrecognized event")
     else:
         logger.warning("Unrecognized event")
 
