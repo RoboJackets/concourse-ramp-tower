@@ -198,6 +198,17 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
 
                             if instance_is_healthy(instance, public_ips, AUTO_SCALING_GROUPS, CONCOURSE_HOSTNAME):
                                 complete_lifecycle_action(instance, AUTO_SCALING_LAUNCHING)
+                    elif (
+                        "LifecycleTransition" in message and message["LifecycleTransition"] == AUTO_SCALING_TERMINATING
+                    ):
+                        instance_id = message["EC2InstanceId"]
+                        auto_scaling_group_name = message["AutoScalingGroupName"]
+                        instance = {
+                            "InstanceId": instance_id,
+                            "AutoScalingGroupName": auto_scaling_group_name,
+                        }
+
+                        instance_is_about_to_be_terminated(instance)
 
 
 if __name__ == "__main__":
