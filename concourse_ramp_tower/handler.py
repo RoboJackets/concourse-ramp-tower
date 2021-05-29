@@ -34,6 +34,7 @@ CONCOURSE_CLIENT_SECRET = environ["CONCOURSE_CLIENT_SECRET"]
 AUTO_SCALING_GROUPS = loads(environ["AUTO_SCALING_GROUPS"])
 
 SSM_SNS_TOPIC_ARN = environ["SSM_SNS_TOPIC_ARN"]
+SSM_SERVICE_ROLE_ARN = environ["SSM_SERVICE_ROLE_ARN"]
 
 access_token_manager = AccessTokenManager(CONCOURSE_HOSTNAME, CONCOURSE_CLIENT_ID, CONCOURSE_CLIENT_SECRET)
 
@@ -54,7 +55,7 @@ def instance_is_about_to_be_terminated(instance: Dict[str, str]) -> None:
     )
     if termination_command_state is None:
         logger.info("Sending termination command")
-        send_termination_command(instance, AUTO_SCALING_GROUPS, SSM_SNS_TOPIC_ARN)
+        send_termination_command(instance, AUTO_SCALING_GROUPS, SSM_SNS_TOPIC_ARN, SSM_SERVICE_ROLE_ARN)
     elif termination_command_state in ("Pending", "InProgress"):
         logger.info("Recording heartbeat for lifecycle hook")
         record_lifecycle_action_heartbeat(instance)
