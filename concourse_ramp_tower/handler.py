@@ -186,8 +186,11 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
             if "EventSource" in record and record["EventSource"] == "aws:sns":
                 message = loads(record["Sns"]["Message"])
                 if "Service" in message and message["Service"] == "AWS Auto Scaling":
-                    if "Event" in message and message["Event"] == "autoscaling:TEST_NOTIFICATION":
-                        logger.info("Received test notification from auto scaling, not actionable")
+                    if "Event" in message and message["Event"] in (
+                        "autoscaling:TEST_NOTIFICATION",
+                        "autoscaling:EC2_INSTANCE_LAUNCH",
+                    ):
+                        logger.info("Received test or launch notification from auto scaling, not actionable")
                     elif "Event" in message and message["Event"] in (
                         "autoscaling:EC2_INSTANCE_TERMINATE",
                         "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
