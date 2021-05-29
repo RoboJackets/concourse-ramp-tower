@@ -192,11 +192,17 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                             )
 
                             if instance_id in worker_states:
+                                logger.info(
+                                    f"Completing launch lifecycle action for instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']}"  # noqa
+                                )
                                 complete_lifecycle_action(instance, AUTO_SCALING_LAUNCHING)
                         else:
                             public_ips = get_public_ips([instance])
 
                             if instance_is_healthy(instance, public_ips, AUTO_SCALING_GROUPS, CONCOURSE_HOSTNAME):
+                                logger.info(
+                                    f"Completing launch lifecycle action for instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']}"  # noqa
+                                )
                                 complete_lifecycle_action(instance, AUTO_SCALING_LAUNCHING)
                     elif (
                         "LifecycleTransition" in message and message["LifecycleTransition"] == AUTO_SCALING_TERMINATING
@@ -209,6 +215,16 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                         }
 
                         instance_is_about_to_be_terminated(instance)
+                    else:
+                        logger.warning("Unrecognized event")
+                else:
+                    logger.warning("Unrecognized event")
+            else:
+                logger.warning("Unrecognized event")
+        else:
+            logger.warning("Unrecognized event")
+    else:
+        logger.warning("Unrecognized event")
 
 
 if __name__ == "__main__":
