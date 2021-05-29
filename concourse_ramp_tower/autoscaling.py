@@ -46,7 +46,8 @@ def get_public_ips(instances: List[Dict[str, str]]) -> Dict[str, str]:
 
     for reservation in ec2_response["Reservations"]:
         for instance in reservation["Instances"]:
-            public_ips[instance["InstanceId"]] = instance["PublicIpAddress"]
+            if "PublicIpAddress" in instance:
+                public_ips[instance["InstanceId"]] = instance["PublicIpAddress"]
 
     return public_ips
 
@@ -63,7 +64,12 @@ def instance_is_healthy(
     :param concourse_hostname: hostname for concourse web node
     :return: whether the instance is healthy
     """
-    public_ip = public_ips[instance["InstanceId"]]
+    instance_id = instance["InstanceId"]
+
+    if instance_id not in public_ips:
+        return False
+
+    public_ip = public_ips[instance_id]
 
     if get_role_for_instance(instance, groups) == "web":
         try:
@@ -129,7 +135,7 @@ def complete_lifecycle_action(instance: Dict[str, str], lifecycle_transition: st
             LifecycleActionResult="CONTINUE",
             InstanceId=instance["InstanceId"],
         )
-    except autoscaling.exceptions.ResourceContentionFault:
+    except (autoscaling.exceptions.ResourceContentionFault, autoscaling.exceptions.ValidationError):
         logger = getLogger()
         logger.info("Lifecycle action already updated")
 
@@ -146,7 +152,7 @@ def record_lifecycle_action_heartbeat(instance: Dict[str, str]) -> None:
             AutoScalingGroupName=instance["AutoScalingGroupName"],
             InstanceId=instance["InstanceId"],
         )
-    except autoscaling.exceptions.ResourceContentionFault:
+    except (autoscaling.exceptions.ResourceContentionFault, autoscaling.exceptions.ValidationError):
         logger = getLogger()
         logger.info("Lifecycle action already updated")
 

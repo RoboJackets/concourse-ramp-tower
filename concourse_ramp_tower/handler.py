@@ -7,7 +7,7 @@ import sys
 from json import dumps, loads
 from logging import getLogger
 from os import environ
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from boto3 import client  # type: ignore
 
@@ -25,7 +25,11 @@ from concourse_ramp_tower.autoscaling import (
 )
 from concourse_ramp_tower.concourse import AccessTokenManager, get_worker_states
 from concourse_ramp_tower.config import get_role_for_instance
-from concourse_ramp_tower.ssm import get_termination_command_state, send_termination_command
+from concourse_ramp_tower.ssm import (
+    SSM_TERMINATION_DOCUMENT_NAME,
+    get_termination_command_state,
+    send_termination_command,
+)
 
 CONCOURSE_HOSTNAME = environ["CONCOURSE_HOSTNAME"]
 CONCOURSE_CLIENT_ID = environ["CONCOURSE_CLIENT_ID"]
@@ -62,6 +66,25 @@ def instance_is_about_to_be_terminated(instance: Dict[str, str]) -> None:
     else:
         logger.info("Marking lifecycle action as complete")
         complete_lifecycle_action(instance, AUTO_SCALING_TERMINATING)
+
+
+def get_auto_scaling_group_for_instance_id(instance_id: str) -> Optional[str]:
+    """
+    Returns the Auto Scaling group name for a given instance ID
+
+    :param instance_id: instance to look up
+    :return: name of the auto scaling group the instance is within, or None if it cannot be found
+    """
+    ec2_response = ec2.describe_instances(InstanceIds=[instance_id])
+
+    for reservation in ec2_response["Reservations"]:
+        for instance in reservation["Instances"]:
+            if instance["InstanceId"] == instance_id:
+                for tag in instance["Tags"]:
+                    if tag["Key"] == "aws:autoscaling:groupName":
+                        return tag["Value"]  # type: ignore
+
+    return None
 
 
 def handler(  # pylint: disable=too-many-branches,too-many-statements
@@ -218,6 +241,19 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                         instance_is_about_to_be_terminated(instance)
                     else:
                         logger.warning("Unrecognized event")
+                elif "documentName" in message and message["documentName"] == SSM_TERMINATION_DOCUMENT_NAME:
+                    instance_id = message["instanceId"]
+                    auto_scaling_group_name = get_auto_scaling_group_for_instance_id(instance_id)
+
+                    if auto_scaling_group_name is None:
+                        continue
+
+                    instance = {
+                        "InstanceId": instance_id,
+                        "AutoScalingGroupName": auto_scaling_group_name,
+                    }
+
+                    instance_is_about_to_be_terminated(instance)
                 else:
                     logger.warning("Unrecognized event")
             else:
