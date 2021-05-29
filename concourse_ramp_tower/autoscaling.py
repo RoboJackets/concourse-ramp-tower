@@ -121,6 +121,17 @@ def get_hook_name(instance: Dict[str, str], lifecycle_transition: str) -> str:
     return matching_hooks[0]  # type: ignore
 
 
+def instance_is_waiting(instance: Dict[str, str]) -> bool:
+    instance_id = instance["InstanceId"]
+    autoscaling_response = autoscaling.describe_auto_scaling_instances(InstanceIds=[instance_id])
+
+    for found_instance in autoscaling_response["AutoScalingInstances"]:
+        if found_instance["InstanceId"] == instance_id and found_instance["LifecycleState"].endswith(":Wait"):
+            return True
+
+    return False
+
+
 def complete_lifecycle_action(instance: Dict[str, str], lifecycle_transition: str) -> None:
     """
     Simple wrapper around the boto3 equivalent
@@ -128,6 +139,9 @@ def complete_lifecycle_action(instance: Dict[str, str], lifecycle_transition: st
     :param instance: instance to mark completed
     :param lifecycle_transition: one of autoscaling:EC2_INSTANCE_LAUNCHING or autoscaling:EC2_INSTANCE_TERMINATING
     """
+    if not instance_is_waiting(instance):
+        return
+
     try:
         autoscaling.complete_lifecycle_action(
             LifecycleHookName=get_hook_name(instance, lifecycle_transition),
@@ -146,6 +160,9 @@ def record_lifecycle_action_heartbeat(instance: Dict[str, str]) -> None:
 
     :param instance: instance to heartbeat
     """
+    if not instance_is_waiting(instance):
+        return
+
     try:
         autoscaling.record_lifecycle_action_heartbeat(
             LifecycleHookName=get_hook_name(instance, AUTO_SCALING_TERMINATING),
