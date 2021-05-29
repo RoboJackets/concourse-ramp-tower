@@ -31,7 +31,9 @@ def get_termination_command_state(instance: Dict[str, str]) -> Optional[str]:
     return invocations[0]["Status"]  # type: ignore
 
 
-def send_termination_command(instance: Dict[str, str], groups: Dict[str, Dict[str, str]], topic_arn: str, service_role_arn: str) -> None:
+def send_termination_command(
+    instance: Dict[str, str], groups: Dict[str, Dict[str, str]], topic_arn: str, service_role_arn: str
+) -> None:
     """
     Sends a termination command to an instance
 
