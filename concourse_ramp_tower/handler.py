@@ -7,7 +7,9 @@ import sys
 from json import dumps, loads
 from logging import getLogger
 from os import environ
-from typing import Dict
+from typing import Any, Dict
+
+from boto3 import client  # type: ignore
 
 from concourse_ramp_tower.autoscaling import (
     AUTO_SCALING_LAUNCHING,
@@ -35,9 +37,34 @@ SSM_SNS_TOPIC_ARN = environ["SSM_SNS_TOPIC_ARN"]
 
 access_token_manager = AccessTokenManager(CONCOURSE_HOSTNAME, CONCOURSE_CLIENT_ID, CONCOURSE_CLIENT_SECRET)
 
+ec2 = client("ec2")
+
+
+def instance_is_about_to_be_terminated(instance: Dict[str, str]) -> None:
+    """
+    Handles gracefully terminating an instance
+
+    :param instance: instance to terminate
+    """
+    logger = getLogger()
+
+    termination_command_state = get_termination_command_state(instance)
+    logger.info(
+        f"Instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']} is about to be terminated, command state is {termination_command_state}"  # noqa
+    )
+    if termination_command_state is None:
+        logger.info("Sending termination command")
+        send_termination_command(instance, AUTO_SCALING_GROUPS, SSM_SNS_TOPIC_ARN)
+    elif termination_command_state in ("Pending", "InProgress"):
+        logger.info("Recording heartbeat for lifecycle hook")
+        record_lifecycle_action_heartbeat(instance)
+    else:
+        logger.info("Marking lifecycle action as complete")
+        complete_lifecycle_action(instance, AUTO_SCALING_TERMINATING)
+
 
 def handler(  # pylint: disable=too-many-branches,too-many-statements
-    event: Dict[str, str], context: None  # pylint: disable=unused-argument
+    event: Dict[str, Any], context: None  # pylint: disable=unused-argument
 ) -> None:
     """
     Receives events from CloudWatch, Auto Scaling, and SSM, and updates state as appropriate
@@ -50,7 +77,12 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
     logger = getLogger()
     logger.setLevel(logging.INFO)
 
-    if event["source"] == "aws.events":
+    if (
+        "source" in event
+        and "detail-type" in event
+        and event["source"] == "aws.events"
+        and event["detail-type"] == "Scheduled Event"
+    ):
         logger.info("Invoked by cron")
 
         web_is_healthy = False
@@ -76,20 +108,7 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                     if role == "web":
                         web_is_healthy = True
             elif instance["LifecycleState"] in ("Terminating", "Terminating:Wait"):
-                termination_command_state = get_termination_command_state(instance)
-                logger.info(
-                    f"Instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']} is about to be terminated, command state is {termination_command_state}"  # noqa
-                )
-                if termination_command_state is None:
-                    logger.info("Sending termination command")
-                    send_termination_command(instance, AUTO_SCALING_GROUPS, SSM_SNS_TOPIC_ARN)
-                    continue
-                if termination_command_state in ("Pending", "InProgress"):
-                    logger.info("Recording heartbeat for lifecycle hook")
-                    record_lifecycle_action_heartbeat(instance)
-                else:
-                    logger.info("Marking lifecycle action as complete")
-                    complete_lifecycle_action(instance, AUTO_SCALING_TERMINATING)
+                instance_is_about_to_be_terminated(instance)
             elif instance["LifecycleState"] == "InService":
                 actually_healthy = instance_is_healthy(instance, public_ips, AUTO_SCALING_GROUPS, CONCOURSE_HOSTNAME)
                 if (instance["HealthStatus"] == UNHEALTHY and actually_healthy) or (
@@ -128,20 +147,7 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                     )
                     complete_lifecycle_action(instance, AUTO_SCALING_LAUNCHING)
             elif instance["LifecycleState"] in ("Terminating", "Terminating:Wait"):
-                termination_command_state = get_termination_command_state(instance)
-                logger.info(
-                    f"Instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']} is about to be terminated, command state is {termination_command_state}"  # noqa
-                )
-                if termination_command_state is None:
-                    logger.info("Sending termination command")
-                    send_termination_command(instance, AUTO_SCALING_GROUPS, SSM_SNS_TOPIC_ARN)
-                    continue
-                if termination_command_state in ("Pending", "InProgress"):
-                    logger.info("Recording heartbeat for lifecycle hook")
-                    record_lifecycle_action_heartbeat(instance)
-                else:
-                    logger.info("Marking lifecycle action as complete")
-                    complete_lifecycle_action(instance, AUTO_SCALING_TERMINATING)
+                instance_is_about_to_be_terminated(instance)
             elif instance["LifecycleState"] == "InService":
                 actually_healthy = instance_id in worker_states
                 if (instance["HealthStatus"] == UNHEALTHY and actually_healthy) or (
@@ -151,6 +157,47 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                         f"Instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']} is marked as {instance['HealthStatus']} but actually_healthy is {actually_healthy}"  # noqa
                     )
                     set_health(instance, actually_healthy)
+    elif "Records" in event:  # pylint: disable=too-many-nested-blocks
+        for record in event["records"]:
+            if "EventSource" in record and record["EventSource"] == "aws:sns":
+                message = loads(record["Sns"]["Message"])
+                if "Service" in message and message["Service"] == "AWS Auto Scaling":
+                    if "Event" in message and message["Event"] == "autoscaling:TEST_NOTIFICATION":
+                        logger.info("Received test notification from auto scaling, not actionable")
+                    elif "Event" in message and message["Event"] in (
+                        "autoscaling:EC2_INSTANCE_TERMINATE",
+                        "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
+                    ):
+                        instance_id = message["EC2InstanceId"]
+                        auto_scaling_group_name = message["AutoScalingGroupName"]
+                        instance = {
+                            "InstanceId": instance_id,
+                            "AutoScalingGroupName": auto_scaling_group_name,
+                        }
+
+                        instance_is_about_to_be_terminated(instance)
+                    elif "LifecycleTransition" in message and message["LifecycleTransition"] == AUTO_SCALING_LAUNCHING:
+                        instance_id = message["EC2InstanceId"]
+                        auto_scaling_group_name = message["AutoScalingGroupName"]
+                        instance = {
+                            "InstanceId": instance_id,
+                            "AutoScalingGroupName": auto_scaling_group_name,
+                        }
+
+                        role = get_role_for_instance(instance, AUTO_SCALING_GROUPS)
+
+                        if role == "worker":
+                            worker_states = get_worker_states(
+                                CONCOURSE_HOSTNAME, access_token_manager.get_access_token()
+                            )
+
+                            if instance_id in worker_states:
+                                complete_lifecycle_action(instance, AUTO_SCALING_LAUNCHING)
+                        else:
+                            public_ips = get_public_ips([instance])
+
+                            if instance_is_healthy(instance, public_ips, AUTO_SCALING_GROUPS, CONCOURSE_HOSTNAME):
+                                complete_lifecycle_action(instance, AUTO_SCALING_LAUNCHING)
 
 
 if __name__ == "__main__":

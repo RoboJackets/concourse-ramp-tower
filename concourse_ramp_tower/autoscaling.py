@@ -2,6 +2,7 @@
 Wraps the Auto Scaling client with a simpler interface
 """
 from json import JSONDecodeError
+from logging import getLogger
 from typing import Dict, List
 
 from boto3 import client  # type: ignore
@@ -129,7 +130,8 @@ def complete_lifecycle_action(instance: Dict[str, str], lifecycle_transition: st
             InstanceId=instance["InstanceId"],
         )
     except autoscaling.exceptions.ResourceContentionFault:
-        pass
+        logger = getLogger()
+        logger.info("Lifecycle action already updated")
 
 
 def record_lifecycle_action_heartbeat(instance: Dict[str, str]) -> None:
@@ -145,7 +147,8 @@ def record_lifecycle_action_heartbeat(instance: Dict[str, str]) -> None:
             InstanceId=instance["InstanceId"],
         )
     except autoscaling.exceptions.ResourceContentionFault:
-        pass
+        logger = getLogger()
+        logger.info("Lifecycle action already updated")
 
 
 def set_health(instance: Dict[str, str], healthy: bool) -> None:

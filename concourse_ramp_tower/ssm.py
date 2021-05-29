@@ -1,6 +1,7 @@
 """
 Wraps the Systems Manager client with a simpler interface
 """
+from logging import getLogger
 from typing import Dict, Optional
 
 from boto3 import client  # type: ignore
@@ -38,17 +39,21 @@ def send_termination_command(instance: Dict[str, str], groups: Dict[str, Dict[st
     :param groups: configuration dict
     :param topic_arn: SNS topic to provide for notifications
     """
-    ssm.send_command(
-        InstanceIds=[
-            instance["InstanceId"],
-        ],
-        DocumentName=SSM_TERMINATION_DOCUMENT_NAME,
-        DocumentVersion="$LATEST",
-        Comment="Instance is about to be terminated",
-        Parameters={"commands": [groups[instance["AutoScalingGroupName"]]["stop_command"]]},
-        NotificationConfig={
-            "NotificationArn": topic_arn,
-            "NotificationEvents": ["All"],
-            "NotificationType": "Invocation",
-        },
-    )
+    try:
+        ssm.send_command(
+            InstanceIds=[
+                instance["InstanceId"],
+            ],
+            DocumentName=SSM_TERMINATION_DOCUMENT_NAME,
+            DocumentVersion="$LATEST",
+            Comment="Instance is about to be terminated",
+            Parameters={"commands": [groups[instance["AutoScalingGroupName"]]["stop_command"]]},
+            NotificationConfig={
+                "NotificationArn": topic_arn,
+                "NotificationEvents": ["All"],
+                "NotificationType": "Invocation",
+            },
+        )
+    except ssm.exceptions.InvalidInstanceId:
+        logger = getLogger()
+        logger.info("Instance is not registered with SSM, skipping")
