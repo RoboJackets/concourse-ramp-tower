@@ -135,7 +135,7 @@ def complete_lifecycle_action(instance: Dict[str, str], lifecycle_transition: st
             LifecycleActionResult="CONTINUE",
             InstanceId=instance["InstanceId"],
         )
-    except (autoscaling.exceptions.ResourceContentionFault, autoscaling.exceptions.ValidationError):
+    except autoscaling.exceptions.ResourceContentionFault:
         logger = getLogger()
         logger.info("Lifecycle action already updated")
 
@@ -152,7 +152,7 @@ def record_lifecycle_action_heartbeat(instance: Dict[str, str]) -> None:
             AutoScalingGroupName=instance["AutoScalingGroupName"],
             InstanceId=instance["InstanceId"],
         )
-    except (autoscaling.exceptions.ResourceContentionFault, autoscaling.exceptions.ValidationError):
+    except autoscaling.exceptions.ResourceContentionFault:
         logger = getLogger()
         logger.info("Lifecycle action already updated")
 
