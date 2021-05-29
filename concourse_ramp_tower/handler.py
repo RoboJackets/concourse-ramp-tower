@@ -158,7 +158,7 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                     )
                     set_health(instance, actually_healthy)
     elif "Records" in event:  # pylint: disable=too-many-nested-blocks
-        for record in event["records"]:
+        for record in event["Records"]:
             if "EventSource" in record and record["EventSource"] == "aws:sns":
                 message = loads(record["Sns"]["Message"])
                 if "Service" in message and message["Service"] == "AWS Auto Scaling":
