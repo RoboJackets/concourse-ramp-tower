@@ -122,6 +122,12 @@ def get_hook_name(instance: Dict[str, str], lifecycle_transition: str) -> str:
 
 
 def instance_is_waiting(instance: Dict[str, str]) -> bool:
+    """
+    Determines if the given instance is waiting on a lifecycle hook
+
+    :param instance: instance to check
+    :return: whether the instance is waiting on a lifecycle hook
+    """
     instance_id = instance["InstanceId"]
     autoscaling_response = autoscaling.describe_auto_scaling_instances(InstanceIds=[instance_id])
 
