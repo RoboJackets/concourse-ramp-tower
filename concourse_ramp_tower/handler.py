@@ -1,7 +1,6 @@
 """
 Synchronize Concourse worker state with AWS auto scaling groups
 """
-
 import logging
 import sys
 from json import dumps, loads
@@ -139,10 +138,8 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                     instance["HealthStatus"] == HEALTHY and not actually_healthy
                 ):
                     logger.info(
-                        f"Instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']} is marked as {instance['HealthStatus']} but actually_healthy is {actually_healthy}"  # noqa
+                        f"Instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']} is marked as {instance['HealthStatus']} but actually_healthy is {actually_healthy}. This is not a worker so skipping."  # noqa
                     )
-                    set_health(instance, actually_healthy)
-                print(actually_healthy)
                 if actually_healthy and role == "web":
                     web_is_healthy = True
 
