@@ -44,11 +44,12 @@ access_token_manager = AccessTokenManager(CONCOURSE_HOSTNAME, CONCOURSE_CLIENT_I
 ec2 = client("ec2")
 
 
-def instance_is_about_to_be_terminated(instance: Dict[str, str]) -> None:
+def instance_is_about_to_be_terminated(instance: Dict[str, str], is_lifecycle_hook: bool = True) -> None:
     """
     Handles gracefully terminating an instance
 
     :param instance: instance to terminate
+    :param is_lifecycle_hook: whether this is being terminated as part of a lifecycle hook
     """
     logger = getLogger()
 
@@ -60,11 +61,13 @@ def instance_is_about_to_be_terminated(instance: Dict[str, str]) -> None:
         logger.info("Sending termination command")
         send_termination_command(instance, AUTO_SCALING_GROUPS, SSM_SNS_TOPIC_ARN, SSM_SERVICE_ROLE_ARN)
     elif termination_command_state in ("Pending", "InProgress"):
-        logger.info("Recording heartbeat for lifecycle hook")
-        record_lifecycle_action_heartbeat(instance)
+        if is_lifecycle_hook:
+            logger.info("Recording heartbeat for lifecycle hook")
+            record_lifecycle_action_heartbeat(instance)
     else:
-        logger.info("Marking lifecycle action as complete")
-        complete_lifecycle_action(instance, AUTO_SCALING_TERMINATING)
+        if is_lifecycle_hook:
+            logger.info("Marking lifecycle action as complete")
+            complete_lifecycle_action(instance, AUTO_SCALING_TERMINATING)
 
 
 def get_auto_scaling_group_for_instance_id(instance_id: str) -> Optional[str]:
@@ -178,6 +181,28 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                         f"Instance {instance['InstanceId']} in group {instance['AutoScalingGroupName']} is marked as {instance['HealthStatus']} but actually_healthy is {actually_healthy}"  # noqa
                     )
                     set_health(instance, actually_healthy)
+    elif (
+        "source" in event  # pylint: disable=too-many-boolean-expressions
+        and "detail-type" in event
+        and "detail" in event
+        and "instance-id" in event["detail"]
+        and event["source"] == "aws.ec2"
+        and event["detail-type"] == "EC2 Spot Instance Interruption Warning"
+    ):
+        instance_id = event["detail"]["instance-id"]
+        auto_scaling_group_name = get_auto_scaling_group_for_instance_id(instance_id)
+
+        if auto_scaling_group_name is None:
+            logger.warning(f"Could not find Auto Scaling group name for instance {instance_id}")
+            return
+
+        instance = {
+            "InstanceId": instance_id,
+            "AutoScalingGroupName": auto_scaling_group_name,
+        }
+
+        instance_is_about_to_be_terminated(instance)
+        set_health(instance, False)
     elif "Records" in event:  # pylint: disable=too-many-nested-blocks
         for record in event["Records"]:
             if "EventSource" in record and record["EventSource"] == "aws:sns":
@@ -194,6 +219,11 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                     ):
                         instance_id = message["EC2InstanceId"]
                         auto_scaling_group_name = message["AutoScalingGroupName"]
+
+                        if auto_scaling_group_name is None:
+                            logger.warning(f"Could not find Auto Scaling group name for instance {instance_id}")
+                            continue
+
                         instance = {
                             "InstanceId": instance_id,
                             "AutoScalingGroupName": auto_scaling_group_name,
@@ -203,9 +233,10 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                     elif "LifecycleTransition" in message and message["LifecycleTransition"] == AUTO_SCALING_LAUNCHING:
                         instance_id = message["EC2InstanceId"]
                         auto_scaling_group_name = message["AutoScalingGroupName"]
+
                         instance = {
                             "InstanceId": instance_id,
-                            "AutoScalingGroupName": auto_scaling_group_name,
+                            "AutoScalingGroupName": auto_scaling_group_name,  # type: ignore
                         }
 
                         role = get_role_for_instance(instance, AUTO_SCALING_GROUPS)
@@ -235,7 +266,7 @@ def handler(  # pylint: disable=too-many-branches,too-many-statements
                         auto_scaling_group_name = message["AutoScalingGroupName"]
                         instance = {
                             "InstanceId": instance_id,
-                            "AutoScalingGroupName": auto_scaling_group_name,
+                            "AutoScalingGroupName": auto_scaling_group_name,  # type: ignore
                         }
 
                         instance_is_about_to_be_terminated(instance)
